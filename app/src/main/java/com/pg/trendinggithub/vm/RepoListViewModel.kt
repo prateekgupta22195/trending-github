@@ -1,43 +1,55 @@
 package com.pg.trendinggithub.vm
 
+import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.pg.trendinggithub.RepositoryAdapter
+import com.pg.trendinggithub.data.remote.RemoteAPIImpl
+import com.pg.trendinggithub.data.remote.client
+import com.pg.trendinggithub.helper.RepositoryAdapter
 import com.pg.trendinggithub.model.GithubRepo
-import com.pg.trendinggithub.model.GithubSearchResponse
-import com.pg.trendinggithub.service.client
+import com.pg.trendinggithub.network.NetworkResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
 
 class RepoListViewModel : ViewModel() {
 
-    val data: MutableList<GithubRepo> = mutableListOf()
+    private val data: MutableList<GithubRepo> = mutableListOf()
+    val errorMessage = MutableLiveData<String?>(null)
 
     val repoAdapter by lazy {
         RepositoryAdapter()
     }
 
+    private val remoteImpl by lazy {
+        RemoteAPIImpl(client)
+    }
+
+//    TODO: we can move this part to repository later on
     init {
-
-        viewModelScope.launch(Dispatchers.IO) {
-            client.getRepos().enqueue(object : Callback<GithubSearchResponse> {
-                override fun onResponse(
-                    call: Call<GithubSearchResponse>,
-                    response: Response<GithubSearchResponse>,
-                ) {
-                    response.body()?.items?.let {
-                        data.addAll(it)
-                        repoAdapter.submitList(data)
-                    }
+        viewModelScope.launch {
+            when (val response = remoteImpl.invoke()) {
+                is NetworkResult.Success -> {
+                    data.addAll(response.data.items)
+                    repoAdapter.submitList(data)
                 }
-
-                override fun onFailure(call: Call<GithubSearchResponse>, t: Throwable) {
-                    t.printStackTrace()
+                is NetworkResult.Error -> {
+                    errorMessage.value = response.message
                 }
-            })
+                is NetworkResult.Exception -> {
+                    errorMessage.value = response.e.message
+                }
+            }
         }
+    }
+
+    fun filterList(query: String) {
+//        This task will be handled to worker thread to avoid main thread blocking
+        viewModelScope.launch(Dispatchers.Default) {
+            repoAdapter.filterList(query, data)
+        }
+    }
+
+    fun clearSearchFilter() {
+        repoAdapter.submitList(data)
     }
 }
